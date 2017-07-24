@@ -1,0 +1,17 @@
+FROM alpine:3.5
+
+RUN ["apk", "add","--update", "bash"]
+RUN ["apk", "add","--update", "expect"]
+RUN ["apk", "add", "--update", "py-pip"]
+RUN ["apk", "add", "--update", "gnupg"]
+RUN ["pip", "install", "--upgrade", "awscli"]
+
+ENV POSTGRES_HOST=localhost
+ENV POSTGRES_PORT=5432
+ENV POSTGRES_USER=postgres
+
+COPY files/PgSqlBackupKey1.key /PgBackup/PgSqlBackupKey1.key
+
+#RUN ["/usr/bin/crontab", "/cron-entry.txt"]
+
+#ENTRYPOINT ["/entry-point.sh"]
