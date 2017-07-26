@@ -66,6 +66,7 @@ downloadFromS3() {
   fi
 }
 
+
 cleanUp() {
   echo "Cleaning up"
   if [ -e $WORK_DIR/$S3_FILE.tar ]; then rm -r $WORK_DIR/$S3_FILE.tar; fi
@@ -153,13 +154,17 @@ encryptAndSignDumpFile(){
 
 #########Restoring the data from s3 buckets#### 
 restore() {
-  cd $WORK_DIR
-  echo "Restore data from s3"
-  downloadFromS3
-  PGPASSWORD=$POSTGRES_PWD $POSTGRES_RESTORE_CLI $WORK_DIR/$BACKUP_FILE
-     
-  cleanUp
-  echo "Done!!!"
+
+			latest_file=`aws s3 ls s3://$AWS_S3_CONFIG_BUCKET/ | grep asc | sort | tail -n 1 | awk '{print $4}' | cut -d'/' -f2`
+	  		aws s3 cp s3://$AWS_S3_CONFIG_BUCKET/$latest_file $WORK_DIR/$latest_file
+	  		if [ $? -ne 0 ]; then
+	    		printf >&2 "\033[1;31mCRITICAL : Download backfile from s3 bucket  Failed\033[0m\n"
+	  		fi 
+	 		 #decription of a file needs to be done here. encrypted file can be access using $WORK_DIR/$latest_file
+			#Below command will might be change depends on decription part. 
+			#PGPASSWORD=$POSTGRES_PWD $POSTGRES_RESTORE_CLI $WORK_DIR/$latest_file
+  			echo "Done!!!"
+
 }
 
 #################
