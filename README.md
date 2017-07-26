@@ -1,7 +1,7 @@
 # Backup utility
 
 
-This service 9s use to take a backup of postgres docker container and upload it to S3 bucket.It is largely subject to change.
+This service use to take a backup of postgres docker container and upload it to S3 bucket.It is largely subject to change.
 
 ## Reference
 
@@ -21,3 +21,4 @@ For POSTGRES_HOST=172.17.0.3 , do check IP of your postgres container by $ docke
 
 #IMPORTANT NOTE
 we are assuming that pgsql bianries will be available on the server, for testing this service on your local machine you need add those binaries in your files folder .
+
