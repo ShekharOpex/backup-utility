@@ -1,5 +1,5 @@
 FROM alpine:3.5
-
+#FROM docker-dev-local.intelliclouddev.com/alpine:3.4
 RUN ["apk", "add","--update", "bash"]
 RUN ["apk", "add","--update", "expect"]
 RUN ["apk", "add", "--update", "py-pip"]
@@ -10,8 +10,11 @@ ENV POSTGRES_HOST=localhost
 ENV POSTGRES_PORT=5432
 ENV POSTGRES_USER=postgres
 
-COPY files/PgSqlBackupKey1.key /PgBackup/PgSqlBackupKey1.key
-
-#RUN ["/usr/bin/crontab", "/cron-entry.txt"]
-
-#ENTRYPOINT ["/entry-point.sh"]
+COPY files/bin/ /bin/
+COPY files/lib/ /lib/
+COPY files/IaPgSqlBackupKey1.key /PgBackup/IaPgSqlBackupKey1.key
+COPY v1-backup-restore.sh /PgBackup/v1-backup-restore.sh
+COPY cron-entry.txt  /PgBackup/cron-entry.txt
+COPY entry-point.sh  /PgBackup/entry-point.sh
+RUN ["/usr/bin/crontab", "/PgBackup/cron-entry.txt"]
+ENTRYPOINT ["/PgBackup/entry-point.sh"]

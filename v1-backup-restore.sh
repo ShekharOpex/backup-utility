@@ -18,15 +18,15 @@ usage(){
 
 ### Variables ###
 declare HOME_DIR="${HOME_DIR:-/PgBackup}"
-declare WORK_DIR="${WORK_DIR:-/tmp}"
+declare WORK_DIR="${WORK_DIR:-/HostPgBackup}"
 declare BACKUP_FILE="${BACKUP_FILE:-postgres_backup.sql}"
 declare BACKUP_FILE_IN_WORK_DIR=$WORK_DIR/$BACKUP_FILE
 
 declare DATA_DUMP_FILE="${DATA_DUMP_FILE:-dump_`date +%d-%m-%Y"_"%H_%M_%S`.sql}"
 declare DATA_DUMP_FILE_IN_WORK_DIR=$WORK_DIR/$DATA_DUMP_FILE
 
-declare GPG_BACKUP_PUBLIC_KEY_NAME="PgSqlBackupKey1"
-declare GPG_BACKUP_PUBLIC_KEY_FILE="PgSqlBackupKey1.key"
+declare GPG_BACKUP_PUBLIC_KEY_NAME="IaPgSqlBackupKey1"
+declare GPG_BACKUP_PUBLIC_KEY_FILE="IaPgSqlBackupKey1.key"
 
 declare S3_FILE="${S3_FILE:-postgres_backup.s3.`date +%s`}"
 
@@ -52,8 +52,8 @@ POSTGRES_RESTORE_PARAMS="-h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -
 POSTGRES_BACKUP_CLI="pg_dumpall $POSTGRES_BACKUP_PARAMS"
 POSTGRES_RESTORE_CLI="psql $POSTGRES_RESTORE_PARAMS" 
 
-#if [ "x$AWS_S3_CONFIG_BUCKET" = "x" ]; then AWS_S3_CONFIG_BUCKET="infra-auto/config-data/postgres"; fi
-#echo "Using AWS S3 bucket : $AWS_S3_CONFIG_BUCKET"
+if [ "x$AWS_S3_CONFIG_BUCKET" = "x" ]; then AWS_S3_CONFIG_BUCKET="infra-auto/config-data/postgres"; fi
+echo "Using AWS S3 bucket : $AWS_S3_CONFIG_BUCKET"
 #############
 
 ### Find the last updated file and download from S3 bucket
@@ -66,6 +66,7 @@ downloadFromS3() {
   fi
 }
 
+
 cleanUp() {
   echo "Cleaning up"
   if [ -e $WORK_DIR/$S3_FILE.tar ]; then rm -r $WORK_DIR/$S3_FILE.tar; fi
@@ -74,10 +75,10 @@ cleanUp() {
 }
 
 uploadToS3() {
-  cp $WORK_DIR/$DATA_DUMP_FILE $WORK_DIR/$BACKUP_FILE
+  #cp $WORK_DIR/$DATA_DUMP_FILE $WORK_DIR/$BACKUP_FILE
 
-  tar -C $WORK_DIR -cvf $WORK_DIR/$S3_FILE.tar $BACKUP_FILE
-  aws s3 cp "$WORK_DIR/$S3_FILE.tar" s3://$AWS_S3_CONFIG_BUCKET/$S3_FILE.tar
+  #tar -C $WORK_DIR -cvf $WORK_DIR/$S3_FILE.tar $BACKUP_FILE
+  aws s3 cp $DATA_DUMP_FILE_IN_WORK_DIR.asc s3://$AWS_S3_CONFIG_BUCKET/$DATA_DUMP_FILE.asc
 }
 
 ########### Start backup of postgres ############
@@ -89,7 +90,9 @@ backup() {
 	
 	encryptAndSignDumpFile
 
-	cleanUp
+	uploadToS3
+	
+	#cleanUp
 	
 	echo
 	echo "Done!!!"
@@ -108,10 +111,10 @@ printVariableValues(){
 }
 
 createDumpFileInWorkDirectory(){
-	#####PGPASSWORD=$POSTGRES_PWD $POSTGRES_BACKUP_CLI > $WORK_DIR/$DATA_DUMP_FILE
+	PGPASSWORD=$POSTGRES_PWD $POSTGRES_BACKUP_CLI > $DATA_DUMP_FILE_IN_WORK_DIR
 	
-	touch $DATA_DUMP_FILE_IN_WORK_DIR
-	echo "Encrypt this file" >> $DATA_DUMP_FILE_IN_WORK_DIR
+	#touch $DATA_DUMP_FILE_IN_WORK_DIR
+	#echo "Encrypt this file" >> $DATA_DUMP_FILE_IN_WORK_DIR
 }
 
 encryptAndSignDumpFile(){
@@ -151,13 +154,17 @@ encryptAndSignDumpFile(){
 
 #########Restoring the data from s3 buckets#### 
 restore() {
-  cd $WORK_DIR
-  echo "Restore data from s3"
-  downloadFromS3
-  PGPASSWORD=$POSTGRES_PWD $POSTGRES_RESTORE_CLI $WORK_DIR/$BACKUP_FILE
-     
-  cleanUp
-  echo "Done!!!"
+
+			latest_file=`aws s3 ls s3://$AWS_S3_CONFIG_BUCKET/ | grep asc | sort | tail -n 1 | awk '{print $4}' | cut -d'/' -f2`
+	  		aws s3 cp s3://$AWS_S3_CONFIG_BUCKET/$latest_file $WORK_DIR/$latest_file
+	  		if [ $? -ne 0 ]; then
+	    		printf >&2 "\033[1;31mCRITICAL : Download backfile from s3 bucket  Failed\033[0m\n"
+	  		fi 
+	 		 #decription of a file needs to be done here. encrypted file can be access using $WORK_DIR/$latest_file
+			#Below command will might be change depends on decription part. 
+			#PGPASSWORD=$POSTGRES_PWD $POSTGRES_RESTORE_CLI $WORK_DIR/$latest_file
+  			echo "Done!!!"
+
 }
 
 #################
