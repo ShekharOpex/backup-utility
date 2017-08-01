@@ -1,9 +1,59 @@
 #!/bin/bash
 ########### Script to backup and restore postgres data #########
 
-usage(){
+########################################################################################################
+
+function main()
+{
+	initScript "$@"
+#####################################################################
+declare HOME_DIR="${HOME_DIR:-/PgBackup}"                                       
+declare WORK_DIR="${WORK_DIR:-/HostPgBackup}"                                   
+declare BACKUP_FILE="${BACKUP_FILE:-postgres_backup.sql}"                       
+declare BACKUP_FILE_IN_WORK_DIR=$WORK_DIR/$BACKUP_FILE                                                                                 
+                                                                                                                                       
+declare DATA_DUMP_FILE="${DATA_DUMP_FILE:-dump_`date +%d-%m-%Y"_"%H_%M_%S`.sql}"                                                       
+declare DATA_DUMP_FILE_IN_WORK_DIR=$WORK_DIR/$CONATINER_NAME$DATA_DUMP_FILE                                                                           
+                                                                                
+declare GPG_BACKUP_PUBLIC_KEY_NAME="IaPgSqlBackupKey1"                          
+declare GPG_BACKUP_PUBLIC_KEY_FILE="IaPgSqlBackupKey1.key"                      
+                                                                                
+declare S3_FILE="${S3_FILE:-postgres_backup.s3.`date +%s`}"                     
+                                                                                
+if [ "x$POSTGRES_USER" = "x" ]; then                                            
+        declare POSTGRES_USER="${POSTGRES_USER:-postgres}";                      
+fi                                                                                                                                     
+if [ "x$POSTGRES_PWD" = "x" ]; then                                                                                                    
+        declare POSTGRES_PWD="${POSTGRES_PWD:-postgres}";                                                                              
+fi                                                                                                                                     
+                                                                                                      
+POSTGRES_BACKUP_PARAMS="-h $POSTGRES_HOST -p $POSTGRES_PORT -c -U $POSTGRES_USER"                     
+POSTGRES_RESTORE_PARAMS="-h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -f"                    
+POSTGRES_BACKUP_CLI="pg_dumpall $POSTGRES_BACKUP_PARAMS"                                              
+POSTGRES_RESTORE_CLI="psql $POSTGRES_RESTORE_PARAMS"                                                  
+                                                                                                      
+if [ "x$AWS_S3_CONFIG_BUCKET" = "x" ]; then AWS_S3_CONFIG_BUCKET="infra-auto/config-data/postgres"; fi
+echo "Using AWS S3 bucket : $AWS_S3_CONFIG_BUCKET"
+#####################################################################
+        case "$Action" in
+        backup)
+            backup
+    ;;
+        restore)
+            restore
+    ;;
+        *)
+            usage 
+    ;;
+    esac
+}
+
+
+function usage(){
 	USAGE=$(cat <<-END
 	${bold}OPTIONS${normal}:
+            	   [-i HOST IP]
+		   [-p HOST port]
 	           [-b (mandatory) : Back up of postgres database.]
 	           [-r (mandatory) : Restore the postgres database.(For restoring you must shutdown all services which contains lock on
 	                  postgres database.)]
@@ -15,50 +65,45 @@ usage(){
 	)
 	echo -e "$USAGE"
 }
+function initScript()
+{
+Action=""
+POSTGRES_HOST=""
+POSTGRES_PORT=""
+CONATINER_NAME=""
 
-### Variables ###
-declare HOME_DIR="${HOME_DIR:-/PgBackup}"
-declare WORK_DIR="${WORK_DIR:-/HostPgBackup}"
-declare BACKUP_FILE="${BACKUP_FILE:-postgres_backup.sql}"
-declare BACKUP_FILE_IN_WORK_DIR=$WORK_DIR/$BACKUP_FILE
+while getopts i:p:a:c:h: opt
+do
+	case "$opt" in
+                i) POSTGRES_HOST=$OPTARG;;
+                p) POSTGRES_PORT=$OPTARG;;
+                a) Action=$OPTARG;;
+                c) CONATINER_NAME=$OPTARG;;
+		h) usage  exit 1 ;;
+		\?) usage exit 1 ;;
+   esac
+done
 
-declare DATA_DUMP_FILE="${DATA_DUMP_FILE:-dump_`date +%d-%m-%Y"_"%H_%M_%S`.sql}"
-declare DATA_DUMP_FILE_IN_WORK_DIR=$WORK_DIR/$DATA_DUMP_FILE
+}
+########
 
-declare GPG_BACKUP_PUBLIC_KEY_NAME="IaPgSqlBackupKey1"
-declare GPG_BACKUP_PUBLIC_KEY_FILE="IaPgSqlBackupKey1.key"
+backup() {
+        	
+	printVariableValues
 
-declare S3_FILE="${S3_FILE:-postgres_backup.s3.`date +%s`}"
+	createDumpFileInWorkDirectory
+	
+	encryptAndSignDumpFile
 
-if [ "x$POSTGRES_HOST" = "x" ]; then
-	declare POSTGRES_HOST="${POSTGRES_HOST:-localhost}";
-fi
-if [ "x$POSTGRES_PORT" = "x" ]; then
-	declare POSTGRES_PORT="${POSTGRES_PORT:-5432}";
-fi
-if [ "x$POSTGRES_USER" = "x" ]; then
-	declare POSTGRES_USER="${POSTGRES_USER:-postgres}"; 
-fi
-if [ "x$POSTGRES_PWD" = "x" ]; then
-	declare POSTGRES_PWD="${POSTGRES_PWD:-postgres}"; 
-fi
-
-echo
-echo "Postgres uri - $POSTGRES_HOST:$POSTGRES_PORT"
-echo
-
-POSTGRES_BACKUP_PARAMS="-h $POSTGRES_HOST -p $POSTGRES_PORT -c -U $POSTGRES_USER"
-POSTGRES_RESTORE_PARAMS="-h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -f"
-POSTGRES_BACKUP_CLI="pg_dumpall $POSTGRES_BACKUP_PARAMS"
-POSTGRES_RESTORE_CLI="psql $POSTGRES_RESTORE_PARAMS" 
-
-if [ "x$AWS_S3_CONFIG_BUCKET" = "x" ]; then AWS_S3_CONFIG_BUCKET="infra-auto/config-data/postgres"; fi
-echo "Using AWS S3 bucket : $AWS_S3_CONFIG_BUCKET"
-#############
-
-### Find the last updated file and download from S3 bucket
+	uploadToS3
+	
+	#cleanUp
+	
+	echo
+	echo "Done!!!"
+}
 downloadFromS3() {
-  latest_file=`aws s3 ls s3://$AWS_S3_CONFIG_BUCKET/ | grep tar | sort | tail -n 1 | awk '{print $4}' | cut -d'/' -f2`
+  latest_file=`aws s3 ls s3://$AWS_S3_CONFIG_BUCKET/ | grep asc | sort | tail -n 1 | awk '{print $4}' | cut -d'/' -f2`
   aws s3 cp s3://$AWS_S3_CONFIG_BUCKET/$latest_file $WORK_DIR/$latest_file
   if [ $? == 0 ]; then
     tar -xvf $WORK_DIR/$latest_file
@@ -78,26 +123,8 @@ uploadToS3() {
   #cp $WORK_DIR/$DATA_DUMP_FILE $WORK_DIR/$BACKUP_FILE
 
   #tar -C $WORK_DIR -cvf $WORK_DIR/$S3_FILE.tar $BACKUP_FILE
-  aws s3 cp $DATA_DUMP_FILE_IN_WORK_DIR.asc s3://$AWS_S3_CONFIG_BUCKET/$DATA_DUMP_FILE.asc
+  aws s3 cp $DATA_DUMP_FILE_IN_WORK_DIR.asc s3://$AWS_S3_CONFIG_BUCKET/$CONATINER_NAME$DATA_DUMP_FILE.asc
 }
-
-########### Start backup of postgres ############
-backup() {
-	
-	printVariableValues
-	
-	createDumpFileInWorkDirectory
-	
-	encryptAndSignDumpFile
-
-	uploadToS3
-	
-	#cleanUp
-	
-	echo
-	echo "Done!!!"
-}
-
 printVariableValues(){
 	echo "Dumping live postgres data using following options values..."
 	echo "Work directory - $WORK_DIR"
@@ -109,7 +136,6 @@ printVariableValues(){
 	# we want to avoid show the password on command line 
 	#echo "PostgreSql key - $POSTGRES_PWD"
 }
-
 createDumpFileInWorkDirectory(){
 	PGPASSWORD=$POSTGRES_PWD $POSTGRES_BACKUP_CLI > $DATA_DUMP_FILE_IN_WORK_DIR
 	
@@ -167,21 +193,4 @@ restore() {
 
 }
 
-#################
-while getopts ":brh" opt
-do
-	case ${opt} in
-		b) backup exit 1 ;;
-		r) restore exit 1 ;;
-		h) usage  exit 1 ;;
-		\?) usage exit 1 ;;
-   esac
-done
-
-# if no parameter passed print guide and exit
-if [ "$#" -eq "0" ]; then
-	#echo -e ${red}'ERROR : Insufficient parameters ! \n'${reset}
-	usage
-	#exit 1		# not sure why this is exiting the container also. need to fix this issue before raising the PR
-fi
-############
+main "$@"

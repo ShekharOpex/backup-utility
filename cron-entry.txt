@@ -1,1 +1,1 @@
-0 */12 * * * /PgBackup/v1-backup-restore.sh -b > /var/log/cron.log 2>&1
+0 */12 * * * /PgBackup/pgBackupForAll.sh > /var/log/cron.log 2>&1
